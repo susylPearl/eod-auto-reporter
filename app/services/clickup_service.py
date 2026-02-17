@@ -36,26 +36,50 @@ _HEADERS: Dict[str, str] = {
 _COMPLETED_STATUSES: Set[str] = {
     "complete",
     "closed",
+    "close",
     "done",
     "resolved",
+    "qa complete",
+    "dev test complete",
 }
 
 # Statuses that indicate active work (in progress)
 _IN_PROGRESS_STATUSES: Set[str] = {
     "in progress",
-    "in review",
+    "dev testing",
     "review",
+    "in review",
+    "qa ready",
+    "qa testing",
     "qa",
+    "on hold",
     "testing",
     "dev-test",
     "ready for review",
     "in development",
+    "development",
+    "working on",
+    "started",
+    "doing",
+    "active",
+    "under review",
+    "pending review",
+    "code review",
+    "staging",
+    "uat",
+    "deployed",
 }
 
 
 def _start_of_today_ms() -> int:
-    """Return start-of-today UTC as a Unix epoch in milliseconds."""
-    now = datetime.now(timezone.utc)
+    """Return start-of-today in the user's configured timezone as Unix epoch ms."""
+    try:
+        from zoneinfo import ZoneInfo
+        tz_name = settings.timezone if settings.timezone else "UTC"
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = timezone.utc
+    now = datetime.now(tz)
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     return int(start.timestamp() * 1000)
 
@@ -168,8 +192,8 @@ def _parse_tasks(raw_tasks: List[Dict[str, Any]]) -> tuple[
             tasks_in_progress.append(task)
             all_active.append(task)
         else:
-            logger.debug(
-                "Skipping task '%s' — status '%s'",
+            logger.info(
+                "Skipping task '%s' — status '%s' (not in completed/in-progress sets)",
                 t.get("name", "?"),
                 status_label,
             )

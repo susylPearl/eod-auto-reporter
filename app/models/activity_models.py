@@ -83,6 +83,39 @@ class ClickUpActivity(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Slack Channel Activity
+# ---------------------------------------------------------------------------
+
+class SlackMessage(BaseModel):
+    """A single Slack message from a monitored channel."""
+
+    user_id: str = Field("", description="Slack user ID of the sender")
+    user_name: str = Field("", description="Display name of the sender")
+    text: str = Field("", description="Message text content")
+    channel_id: str = Field("", description="Channel ID")
+    channel_name: str = Field("", description="Channel name")
+    timestamp: datetime = Field(default_factory=datetime.now)
+    thread_ts: Optional[str] = Field(None, description="Thread parent timestamp (if threaded)")
+
+
+class SlackChannelActivity(BaseModel):
+    """Activity from monitored Slack channels for a single day."""
+
+    messages: List[SlackMessage] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# AI Summary
+# ---------------------------------------------------------------------------
+
+class AISummary(BaseModel):
+    """AI-generated summary of all daily activity."""
+
+    summary_text: str = Field("", description="Brief AI-generated summary")
+    generated_at: Optional[datetime] = None
+
+
+# ---------------------------------------------------------------------------
 # Unified
 # ---------------------------------------------------------------------------
 
@@ -92,3 +125,6 @@ class DailyActivity(BaseModel):
     date: str = Field(..., description="ISO date string (YYYY-MM-DD)")
     github: GitHubActivity = Field(default_factory=GitHubActivity)
     clickup: ClickUpActivity = Field(default_factory=ClickUpActivity)
+    slack_discussions: SlackChannelActivity = Field(default_factory=SlackChannelActivity)
+    manual_updates: List[str] = Field(default_factory=list)
+    ai_summary: Optional[AISummary] = None

@@ -27,6 +27,25 @@ logger = get_logger(__name__)
 scheduler = AsyncIOScheduler()
 
 
+def _load_manual_updates() -> list[str]:
+    """
+    Best-effort load manual updates from desktop config.
+
+    Keeps backend usage safe by falling back to [] when desktop modules
+    are unavailable.
+    """
+    try:
+        from desktop.config_store import load_config  # type: ignore
+
+        cfg = load_config()
+        raw = cfg.get("manual_updates", [])
+        if not isinstance(raw, list):
+            return []
+        return [str(x).strip() for x in raw if str(x).strip()][:30]
+    except Exception:
+        return []
+
+
 def run_eod_pipeline() -> str:
     """
     Execute the full EOD pipeline synchronously:
@@ -58,6 +77,7 @@ def run_eod_pipeline() -> str:
         date=today,
         github=gh_activity,
         clickup=cu_activity,
+        manual_updates=_load_manual_updates(),
     )
 
     # --- Generate summary -----------------------------------------------------

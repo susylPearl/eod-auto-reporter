@@ -13,17 +13,17 @@ class Settings(BaseSettings):
     """Central configuration for the EOD Auto Reporter."""
 
     # --- GitHub ---
-    github_token: str = Field(..., description="GitHub personal access token")
-    github_username: str = Field(..., description="GitHub username to track activity for")
+    github_token: str = Field(default="", description="GitHub personal access token")
+    github_username: str = Field(default="", description="GitHub username to track activity for")
 
     # --- ClickUp ---
-    clickup_api_token: str = Field(..., description="ClickUp API v2 personal token")
-    clickup_team_id: str = Field(..., description="ClickUp workspace (team) ID")
-    clickup_user_id: int = Field(..., description="Numeric ClickUp user ID for the authenticated user")
+    clickup_api_token: str = Field(default="", description="ClickUp API v2 personal token")
+    clickup_team_id: str = Field(default="", description="ClickUp workspace (team) ID")
+    clickup_user_id: int = Field(default=0, description="Numeric ClickUp user ID for the authenticated user")
 
     # --- Slack ---
-    slack_bot_token: str = Field(..., description="Slack Bot User OAuth Token (xoxb-...)")
-    slack_channel: str = Field(..., description="Slack channel ID or name to post the EOD report")
+    slack_bot_token: str = Field(default="", description="Slack Bot User OAuth Token (xoxb-...)")
+    slack_channel: str = Field(default="", description="Slack channel ID or name to post the EOD report")
     slack_user_id: str = Field(default="", description="Your Slack user ID (for OOO check & profile picture)")
     slack_display_name: str = Field(default="", description="Display name shown on EOD posts (e.g. Chiranjhivi Ghimire)")
     slack_icon_url: str = Field(default="", description="URL to your profile picture for EOD posts")
@@ -44,5 +44,21 @@ class Settings(BaseSettings):
     }
 
 
-# Singleton — import this everywhere
-settings = Settings()
+# Singleton — import this everywhere.
+# Wrapped in try/except so the desktop app can set env vars first,
+# and so the module doesn't crash if .env is missing during initial import.
+try:
+    settings = Settings()
+except Exception:
+    settings = None  # type: ignore[assignment]
+
+
+def load_settings_from_env() -> "Settings":
+    """
+    (Re-)create the Settings singleton from current environment variables.
+
+    Call this after setting os.environ in desktop mode.
+    """
+    global settings
+    settings = Settings()
+    return settings

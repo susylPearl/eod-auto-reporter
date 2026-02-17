@@ -1,0 +1,6 @@
+# Desktop app dependencies (in addition to requirements.txt)
+customtkinter>=5.2.0
+Pillow>=10.0.0
+
+# Packaging (only needed to build .app bundle)
+py2app>=0.28.0

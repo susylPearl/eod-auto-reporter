@@ -131,21 +131,23 @@ def _fetch_prs(username: str) -> tuple[List[GitHubPR], List[GitHubPR]]:
     opened: List[GitHubPR] = []
     merged: List[GitHubPR] = []
 
-    # --- PRs created today ---
-    query_opened = f"author:{username} type:pr created:>={today_str}"
+    # --- PRs created today (only open, exclude closed/merged) ---
+    query_opened = f"author:{username} type:pr created:>={today_str} is:open"
     try:
         data = _get(
             f"{_BASE}/search/issues",
             params={"q": query_opened, "per_page": 50, "sort": "created", "order": "desc"},
         )
         for item in data.get("items", []):
+            if item.get("state") != "open":
+                continue
             repo_full = item["repository_url"].replace("https://api.github.com/repos/", "")
             opened.append(
                 GitHubPR(
                     number=item["number"],
                     title=item["title"],
                     repo=repo_full,
-                    state=item["state"],
+                    state="open",
                     url=item["html_url"],
                     created_at=datetime.fromisoformat(item["created_at"].replace("Z", "+00:00")),
                     merged_at=None,

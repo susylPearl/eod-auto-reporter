@@ -10,6 +10,9 @@ requests>=2.32.0
 # Slack
 slack-sdk>=3.33.0
 
+# AI Summary
+openai>=1.0.0
+
 # Scheduler
 APScheduler>=3.10.0
 

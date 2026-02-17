@@ -22,24 +22,38 @@ Automated End-of-Day summary generator that pulls activity from **GitHub** and *
 
 ```
 eod-auto-reporter/
-├── app/
+├── app/                         # Core logic (shared by desktop & cloud)
 │   ├── main.py                  # FastAPI app + startup
 │   ├── config.py                # Pydantic BaseSettings
 │   ├── logger.py                # Centralized logging
-│   ├── scheduler.py             # APScheduler cron job
+│   ├── scheduler.py             # APScheduler cron job + EOD pipeline
 │   ├── services/
 │   │   ├── github_service.py    # GitHub REST API integration
 │   │   ├── clickup_service.py   # ClickUp API v2 integration
 │   │   ├── slack_service.py     # Slack WebClient integration
-│   │   └── summary_service.py   # Report formatter
+│   │   ├── slack_activity_service.py  # Slack channel discussions
+│   │   ├── ai_summary_service.py     # AI summarization (Gemini, Groq, OpenAI)
+│   │   └── summary_service.py   # Report formatter (Block Kit)
 │   └── models/
 │       └── activity_models.py   # Pydantic domain models
+├── desktop/                     # macOS desktop app (CustomTkinter)
+│   ├── main.py                  # Desktop entry point
+│   ├── app_window.py            # Main window + sidebar nav
+│   ├── config_store.py          # JSON config persistence
+│   ├── service_bridge.py        # Config → env injection
+│   ├── local_scheduler.py       # Background scheduler
+│   └── views/                   # Dashboard, Activity, Settings, Support
+├── docs/
+│   └── ARCHITECTURE.md          # Architecture & design documentation
 ├── tests/                       # Unit tests (pytest)
+├── setup_mac.py                 # py2app build script
 ├── .env.example                 # Template for environment variables
 ├── requirements.txt
 ├── Dockerfile
 └── README.md
 ```
+
+📖 **Architecture & design**: See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for component breakdown, data flow, and deployment details.
 
 ---
 
@@ -74,11 +88,23 @@ Edit `.env` and fill in all values (see sections below for how to obtain each to
 
 ### 3. Run Locally
 
+**Cloud mode (FastAPI):**
 ```bash
 uvicorn app.main:app --reload --port 8000
 ```
 
 The scheduler starts automatically on boot. Visit `http://localhost:8000/health` to verify.
+
+**Desktop mode (macOS):**
+```bash
+python -m desktop.main
+```
+
+Or build a standalone `.app`:
+```bash
+python setup_mac.py py2app
+# Output: dist/EOD Reporter.app
+```
 
 ### 4. Run Tests
 

@@ -17,7 +17,7 @@ from collections import defaultdict
 from typing import Any, Dict, List
 
 from app.logger import get_logger
-from app.models.activity_models import ClickUpActivity, ClickUpTask, DailyActivity, GitHubActivity
+from app.models.activity_models import ClickUpActivity, ClickUpComment, ClickUpTask, DailyActivity, GitHubActivity
 
 logger = get_logger(__name__)
 
@@ -67,7 +67,19 @@ def _link(url: str, t: str, bold: bool = False) -> Dict[str, Any]:
 
 def _section(*elements: Dict[str, Any]) -> Dict[str, Any]:
     """Create a rich_text_section."""
-    return {"type": "rich_text_section", "elements": list(elements)}
+    cleaned: List[Dict[str, Any]] = []
+    for elem in elements:
+        if not elem:
+            continue
+        # Slack rejects empty rich_text text nodes (must be > 0 chars).
+        if elem.get("type") == "text" and not str(elem.get("text", "")):
+            continue
+        cleaned.append(elem)
+
+    if not cleaned:
+        cleaned = [_text(" ")]
+
+    return {"type": "rich_text_section", "elements": cleaned}
 
 
 def _list_block(indent: int, items: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -161,6 +173,42 @@ def _build_task_hierarchy(
     return top_level, dict(children)
 
 
+def _group_comments_by_task(comments: List[ClickUpComment]) -> Dict[str, List[str]]:
+    """Group comment text snippets by task ID (preserving order)."""
+    grouped: Dict[str, List[str]] = defaultdict(list)
+    for c in comments:
+        text = (c.comment_text or "").strip()
+        if text:
+            grouped[c.task_id].append(text)
+    return grouped
+
+
+def _shorten_line(text: str, limit: int = 100) -> str:
+    """Keep a single line concise for Slack subtext."""
+    clean = " ".join(text.split())
+    if len(clean) <= limit:
+        return clean
+    return clean[: limit - 1].rstrip() + "…"
+
+
+def _task_comment_subtext(task_id: str, comments_by_task: Dict[str, List[str]]) -> str:
+    """
+    Build a compact 1-2 line comment summary for a task.
+
+    Returned string is meant to be appended as subtext under the task line.
+    """
+    items = comments_by_task.get(task_id, [])
+    if not items:
+        return ""
+
+    line1 = f"\nnote: {_shorten_line(items[0])}"
+    if len(items) == 1:
+        return line1
+
+    line2 = f"\nnote: {_shorten_line(items[1])}"
+    return line1 + line2
+
+
 def _build_clickup_elements(cu: ClickUpActivity) -> List[Dict[str, Any]]:
     """Build Block Kit elements for ClickUp task updates with hierarchy."""
     elements: List[Dict[str, Any]] = []
@@ -170,6 +218,7 @@ def _build_clickup_elements(cu: ClickUpActivity) -> List[Dict[str, Any]]:
 
     all_tasks = cu.tasks_updated
     top_level, children = _build_task_hierarchy(all_tasks)
+    comments_by_task = _group_comments_by_task(cu.comments)
 
     rendered: set[str] = set()
     completed_ids = {t.task_id for t in cu.tasks_completed}
@@ -177,7 +226,8 @@ def _build_clickup_elements(cu: ClickUpActivity) -> List[Dict[str, Any]]:
     # --- Completed tasks first ---
     for t in top_level:
         if t.task_id in completed_ids and t.task_id not in rendered:
-            parent_items = [_section(_text("completed: "), _link(t.url, t.name))]
+            parent_subtext = _task_comment_subtext(t.task_id, comments_by_task)
+            parent_items = [_section(_text("completed: "), _link(t.url, t.name), _text(parent_subtext, italic=True))]
             elements.append(_list_block(1, parent_items))
             rendered.add(t.task_id)
 
@@ -186,7 +236,8 @@ def _build_clickup_elements(cu: ClickUpActivity) -> List[Dict[str, Any]]:
                 if child.task_id not in rendered:
                     prefix = _status_prefix(child.status)
                     suffix = f" - {prefix}" if prefix else ""
-                    child_items.append(_section(_link(child.url, child.name), _text(suffix)))
+                    child_subtext = _task_comment_subtext(child.task_id, comments_by_task)
+                    child_items.append(_section(_link(child.url, child.name), _text(suffix), _text(child_subtext, italic=True)))
                     rendered.add(child.task_id)
             if child_items:
                 elements.append(_list_block(2, child_items))
@@ -194,7 +245,8 @@ def _build_clickup_elements(cu: ClickUpActivity) -> List[Dict[str, Any]]:
     # Completed subtasks whose parent isn't completed
     for t in cu.tasks_completed:
         if t.task_id not in rendered:
-            elements.append(_list_block(1, [_section(_text("completed: "), _link(t.url, t.name))]))
+            task_subtext = _task_comment_subtext(t.task_id, comments_by_task)
+            elements.append(_list_block(1, [_section(_text("completed: "), _link(t.url, t.name), _text(task_subtext, italic=True))]))
             rendered.add(t.task_id)
 
     # --- In-progress tasks (parent → subtasks) ---
@@ -203,7 +255,8 @@ def _build_clickup_elements(cu: ClickUpActivity) -> List[Dict[str, Any]]:
             continue
         prefix = _status_prefix(t.status)
         label = f"{prefix}: " if prefix else ""
-        parent_items = [_section(_text(label), _link(t.url, t.name))]
+        parent_subtext = _task_comment_subtext(t.task_id, comments_by_task)
+        parent_items = [_section(_text(label), _link(t.url, t.name), _text(parent_subtext, italic=True))]
         elements.append(_list_block(1, parent_items))
         rendered.add(t.task_id)
 
@@ -212,7 +265,8 @@ def _build_clickup_elements(cu: ClickUpActivity) -> List[Dict[str, Any]]:
             if child.task_id not in rendered:
                 child_prefix = _status_prefix(child.status)
                 suffix = f" - {child_prefix}" if child_prefix else ""
-                child_items.append(_section(_link(child.url, child.name), _text(suffix)))
+                child_subtext = _task_comment_subtext(child.task_id, comments_by_task)
+                child_items.append(_section(_link(child.url, child.name), _text(suffix), _text(child_subtext, italic=True)))
                 rendered.add(child.task_id)
         if child_items:
             elements.append(_list_block(2, child_items))
@@ -223,22 +277,11 @@ def _build_clickup_elements(cu: ClickUpActivity) -> List[Dict[str, Any]]:
         if t.task_id not in rendered:
             prefix = _status_prefix(t.status)
             label = f"{prefix}: " if prefix else ""
-            remaining_items.append(_section(_text(label), _link(t.url, t.name)))
+            rem_subtext = _task_comment_subtext(t.task_id, comments_by_task)
+            remaining_items.append(_section(_text(label), _link(t.url, t.name), _text(rem_subtext, italic=True)))
             rendered.add(t.task_id)
     if remaining_items:
         elements.append(_list_block(1, remaining_items))
-
-    # Comments
-    if cu.comments:
-        comment_items = []
-        for c in cu.comments[:5]:
-            snippet = c.comment_text[:100] + ("…" if len(c.comment_text) > 100 else "")
-            comment_items.append(_section(
-                _text("commented on "),
-                _text(c.task_name, italic=True),
-                _text(f": {snippet}"),
-            ))
-        elements.append(_list_block(1, comment_items))
 
     return elements
 
@@ -262,6 +305,23 @@ def _build_next_elements(activity: DailyActivity) -> List[Dict[str, Any]]:
         items.append(_section(_text(label), _link(t.url, t.name)))
 
     return items
+
+
+def _build_manual_elements(manual_updates: List[str]) -> List[Dict[str, Any]]:
+    """Build Block Kit elements for user-authored manual updates."""
+    if not manual_updates:
+        return []
+    items = []
+    for text in manual_updates[:20]:
+        clean = " ".join(str(text).split()).strip()
+        if not clean:
+            continue
+        if len(clean) > 180:
+            clean = clean[:179].rstrip() + "…"
+        items.append(_section(_text(clean)))
+    if not items:
+        return []
+    return [_list_block(1, items)]
 
 
 # ------------------------------------------------------------------
@@ -293,11 +353,11 @@ def generate_summary_blocks(activity: DailyActivity) -> List[Dict[str, Any]]:
         rt_elements.append(_list_block(0, [_section(_text("Task updates:", bold=True))]))
         rt_elements.extend(cu_elements)
 
-    # --- PRs in review ---
-    if activity.github.prs_opened:
-        open_prs = [pr for pr in activity.github.prs_opened if pr.state == "open"]
-        if open_prs:
-            rt_elements.append(_list_block(0, [_section(_text("PRs in review", bold=True))]))
+    # --- Manual updates ---
+    manual_elements = _build_manual_elements(activity.manual_updates)
+    if manual_elements:
+        rt_elements.append(_list_block(0, [_section(_text("Additional updates:", bold=True))]))
+        rt_elements.extend(manual_elements)
 
     # Empty state
     if len(rt_elements) == 1:
@@ -333,5 +393,7 @@ def generate_summary(activity: DailyActivity) -> str:
         parts.append(f"Completed: {len(activity.clickup.tasks_completed)} tasks")
     if activity.clickup.status_changes:
         parts.append(f"In progress: {len(activity.clickup.status_changes)} tasks")
+    if activity.manual_updates:
+        parts.append(f"Additional updates: {len(activity.manual_updates)}")
 
     return " | ".join(parts)
