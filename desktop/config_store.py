@@ -135,60 +135,261 @@ def save_config(config: Dict[str, Any]) -> None:
     )
 
 
+_ENV_MAP = {
+    "GITHUB_TOKEN": "github_token",
+    "GITHUB_USERNAME": "github_username",
+    "CLICKUP_API_TOKEN": "clickup_api_token",
+    "CLICKUP_TEAM_ID": "clickup_team_id",
+    "CLICKUP_USER_ID": "clickup_user_id",
+    "SLACK_BOT_TOKEN": "slack_bot_token",
+    "SLACK_CHANNEL": "slack_channel",
+    "SLACK_USER_ID": "slack_user_id",
+    "SLACK_DISPLAY_NAME": "slack_display_name",
+    "SLACK_ICON_URL": "slack_icon_url",
+    "SLACK_MONITOR_CHANNELS": "slack_monitor_channels",
+    "REPORT_HOUR": "report_hour",
+    "REPORT_MINUTE": "report_minute",
+    "TIMEZONE": "timezone",
+    "LOG_LEVEL": "log_level",
+    "APP_ENV": "app_env",
+    "OPENAI_API_KEY": "openai_api_key",
+    "AI_MODEL": "ai_model",
+    "AI_BASE_URL": "ai_base_url",
+    "AI_PROVIDER": "ai_provider",
+}
+
+_LABEL_MAP: Dict[str, str] = {
+    "github token": "github_token",
+    "github username": "github_username",
+    "clickup api token": "clickup_api_token",
+    "clickup token": "clickup_api_token",
+    "clickup team id": "clickup_team_id",
+    "team id": "clickup_team_id",
+    "clickup user id": "clickup_user_id",
+    "slack bot token": "slack_bot_token",
+    "bot token": "slack_bot_token",
+    "slack channel": "slack_channel",
+    "eod channel": "slack_channel",
+    "slack user id": "slack_user_id",
+    "display name": "slack_display_name",
+    "slack display name": "slack_display_name",
+    "icon url": "slack_icon_url",
+    "slack icon url": "slack_icon_url",
+    "monitor channels": "slack_monitor_channels",
+    "report hour": "report_hour",
+    "hour": "report_hour",
+    "report minute": "report_minute",
+    "minute": "report_minute",
+    "timezone": "timezone",
+    "openai api key": "openai_api_key",
+    "api key": "openai_api_key",
+    "ai model": "ai_model",
+    "model": "ai_model",
+    "ai base url": "ai_base_url",
+    "base url": "ai_base_url",
+    "ai provider": "ai_provider",
+    "provider": "ai_provider",
+}
+
+_INT_FIELDS = {"report_hour", "report_minute"}
+
+
+def _coerce_value(config_key: str, value: str) -> Any:
+    """Cast a raw string value to the right type for a config key."""
+    if config_key in _INT_FIELDS:
+        try:
+            return int(value)
+        except ValueError:
+            return value
+    return value
+
+
+def _extract_kv_from_text(text: str) -> Dict[str, Any]:
+    """
+    Extract config values from free-form text by matching known keys.
+
+    Supports:
+      - KEY=VALUE  (.env style)
+      - "KEY": "VALUE"  (JSON-in-text)
+      - Label: value  (human-readable labels)
+      - | Label | Value |  (markdown tables)
+    """
+    import re
+
+    found: Dict[str, Any] = {}
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        # Strip markdown list markers: - , * , + , numbered 1.
+        line = re.sub(r'^(?:[-*+]|\d+\.)\s+', '', line).strip()
+
+        # --- KEY=VALUE (.env style) ---
+        if "=" in line and not line.startswith("|"):
+            key, _, value = line.partition("=")
+            key = key.strip().strip('"').strip("'")
+            value = value.strip().strip('"').strip("'")
+            if key in _ENV_MAP and value:
+                cfg_key = _ENV_MAP[key]
+                found[cfg_key] = _coerce_value(cfg_key, value)
+                continue
+            lower = key.lower().replace("_", " ").strip()
+            if lower in _LABEL_MAP and value:
+                cfg_key = _LABEL_MAP[lower]
+                found[cfg_key] = _coerce_value(cfg_key, value)
+                continue
+
+        # --- "KEY": "VALUE" (JSON fragments in text) ---
+        json_match = re.match(
+            r'["\']?([A-Z_a-z][A-Za-z_]*)["\']?\s*:\s*["\'](.+?)["\']', line
+        )
+        if json_match:
+            key, value = json_match.group(1).strip(), json_match.group(2).strip()
+            if key in _ENV_MAP and value:
+                cfg_key = _ENV_MAP[key]
+                found[cfg_key] = _coerce_value(cfg_key, value)
+                continue
+            lower_key = key.lower().replace("_", " ").strip()
+            if lower_key in _LABEL_MAP and value:
+                cfg_key = _LABEL_MAP[lower_key]
+                found[cfg_key] = _coerce_value(cfg_key, value)
+                continue
+
+        # --- Table row: | Label | Value | or Label | Value ---
+        if "|" in line:
+            cells = [c.strip() for c in line.split("|")]
+            cells = [c for c in cells if c and not re.match(r'^[-:]+$', c)]
+            if len(cells) >= 2:
+                label = cells[0].strip().strip("`*_")
+                value = cells[1].strip().strip("`*_")
+                lower_label = label.lower().replace("_", " ").strip()
+                if lower_label in _LABEL_MAP and value:
+                    cfg_key = _LABEL_MAP[lower_label]
+                    found[cfg_key] = _coerce_value(cfg_key, value)
+                    continue
+                upper_label = label.replace(" ", "_").upper()
+                if upper_label in _ENV_MAP and value:
+                    cfg_key = _ENV_MAP[upper_label]
+                    found[cfg_key] = _coerce_value(cfg_key, value)
+                    continue
+
+        # --- Label: value (colon-separated, human-readable) ---
+        colon_match = re.match(r'^([A-Za-z][A-Za-z_ ]{2,30})\s*:\s*(.+)$', line)
+        if colon_match:
+            label = colon_match.group(1).strip()
+            value = colon_match.group(2).strip().strip("`*_\"'")
+            lower_label = label.lower().replace("_", " ").strip()
+            if lower_label in _LABEL_MAP and value:
+                cfg_key = _LABEL_MAP[lower_label]
+                found[cfg_key] = _coerce_value(cfg_key, value)
+                continue
+
+    return found
+
+
+def _read_docx_text(path: Path) -> Optional[str]:
+    """Extract plain text from a .docx file. Returns None if unreadable."""
+    try:
+        from docx import Document
+        doc = Document(str(path))
+        lines: list[str] = []
+        for para in doc.paragraphs:
+            if para.text.strip():
+                lines.append(para.text.strip())
+        for table in doc.tables:
+            for row in table.rows:
+                cells = [cell.text.strip() for cell in row.cells]
+                lines.append(" | ".join(cells))
+        return "\n".join(lines)
+    except ImportError:
+        return None
+    except Exception:
+        return None
+
+
+def import_from_file(file_path: str | Path) -> Optional[Dict[str, Any]]:
+    """
+    Import settings from a file of any supported format.
+
+    Supported: .env, .txt, .json, .md, .docx, .doc
+    Returns a config dict (merged with defaults), or None on failure.
+    """
+    path = Path(file_path)
+    if not path.exists():
+        return None
+
+    suffix = path.suffix.lower()
+
+    # --- JSON ---
+    if suffix == ".json":
+        return _import_json(path)
+
+    # --- Word documents ---
+    if suffix in (".docx", ".doc"):
+        text = _read_docx_text(path)
+        if not text:
+            return None
+        found = _extract_kv_from_text(text)
+        if not found:
+            return None
+        result = dict(DEFAULT_CONFIG)
+        result.update(found)
+        return result
+
+    # --- Text-based: .env, .txt, .md, or anything else ---
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+    found = _extract_kv_from_text(text)
+    if not found:
+        return None
+    result = dict(DEFAULT_CONFIG)
+    result.update(found)
+    return result
+
+
+def _import_json(path: Path) -> Optional[Dict[str, Any]]:
+    """
+    Import from a JSON file.
+
+    Handles both config-key format (lowercase) and env-var format (UPPER_CASE).
+    """
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+    if not isinstance(data, dict):
+        return None
+
+    result = dict(DEFAULT_CONFIG)
+    for key, value in data.items():
+        if isinstance(value, (dict, list)):
+            continue
+        str_val = str(value).strip()
+        if not str_val:
+            continue
+        # Direct config key match
+        if key in DEFAULT_CONFIG:
+            result[key] = _coerce_value(key, str_val)
+        # UPPER_CASE env-var key
+        elif key in _ENV_MAP:
+            cfg_key = _ENV_MAP[key]
+            result[cfg_key] = _coerce_value(cfg_key, str_val)
+
+    return result
+
+
 def import_from_dotenv(dotenv_path: str | Path) -> Optional[Dict[str, Any]]:
     """
     Import settings from an existing .env file.
 
     Returns the imported config dict, or None if the file doesn't exist.
     """
-    path = Path(dotenv_path)
-    if not path.exists():
-        return None
-
-    imported: Dict[str, Any] = dict(DEFAULT_CONFIG)
-    env_map = {
-        "GITHUB_TOKEN": "github_token",
-        "GITHUB_USERNAME": "github_username",
-        "CLICKUP_API_TOKEN": "clickup_api_token",
-        "CLICKUP_TEAM_ID": "clickup_team_id",
-        "CLICKUP_USER_ID": "clickup_user_id",
-        "SLACK_BOT_TOKEN": "slack_bot_token",
-        "SLACK_CHANNEL": "slack_channel",
-        "SLACK_USER_ID": "slack_user_id",
-        "SLACK_DISPLAY_NAME": "slack_display_name",
-        "SLACK_ICON_URL": "slack_icon_url",
-        "REPORT_HOUR": "report_hour",
-        "REPORT_MINUTE": "report_minute",
-        "TIMEZONE": "timezone",
-        "LOG_LEVEL": "log_level",
-        "APP_ENV": "app_env",
-    }
-
-    try:
-        for line in path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            key = key.strip()
-            value = value.strip()
-            if key in env_map:
-                config_key = env_map[key]
-                # Convert numeric fields
-                if config_key in ("report_hour", "report_minute"):
-                    try:
-                        value = int(value)
-                    except ValueError:
-                        pass
-                elif config_key == "clickup_user_id":
-                    pass  # keep as string in our config
-                imported[config_key] = value
-    except OSError:
-        return None
-
-    return imported
+    return import_from_file(dotenv_path)
 
 
 def config_exists() -> bool:

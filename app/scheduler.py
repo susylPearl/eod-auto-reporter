@@ -14,7 +14,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from app.config import settings
 from app.logger import get_logger
-from app.models.activity_models import DailyActivity
+from app.models.activity_models import ClickUpActivity, DailyActivity, GitHubActivity
 from app.services import (
     clickup_service,
     github_service,
@@ -27,6 +27,15 @@ logger = get_logger(__name__)
 scheduler = AsyncIOScheduler()
 
 
+def _load_eod_config() -> dict:
+    """Load desktop config for EOD pipeline (filters, manual updates)."""
+    try:
+        from desktop.config_store import load_config  # type: ignore
+        return load_config()
+    except Exception:
+        return {}
+
+
 def _load_manual_updates() -> list[str]:
     """
     Best-effort load manual updates from desktop config.
@@ -34,16 +43,11 @@ def _load_manual_updates() -> list[str]:
     Keeps backend usage safe by falling back to [] when desktop modules
     are unavailable.
     """
-    try:
-        from desktop.config_store import load_config  # type: ignore
-
-        cfg = load_config()
-        raw = cfg.get("manual_updates", [])
-        if not isinstance(raw, list):
-            return []
-        return [str(x).strip() for x in raw if str(x).strip()][:30]
-    except Exception:
+    cfg = _load_eod_config()
+    raw = cfg.get("manual_updates", [])
+    if not isinstance(raw, list):
         return []
+    return [str(x).strip() for x in raw if str(x).strip()][:30]
 
 
 def run_eod_pipeline() -> str:
@@ -67,17 +71,24 @@ def run_eod_pipeline() -> str:
         logger.info(msg)
         return msg
 
-    # --- Collect activity -----------------------------------------------------
+    # --- Collect activity (respect Activity tab filters) -----------------------
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    cfg = _load_eod_config()
+    show_github = cfg.get("show_github", True)
+    show_clickup = cfg.get("show_clickup", True)
+    show_manual = cfg.get("show_manual", True)
+    if not (show_github and show_clickup and show_manual):
+        logger.info("EOD filters: github=%s, clickup=%s, manual=%s", show_github, show_clickup, show_manual)
 
-    gh_activity = github_service.fetch_github_activity()
-    cu_activity = clickup_service.fetch_clickup_activity()
+    gh_activity = github_service.fetch_github_activity() if show_github else GitHubActivity()
+    cu_activity = clickup_service.fetch_clickup_activity() if show_clickup else ClickUpActivity()
+    manual_updates = _load_manual_updates() if show_manual else []
 
     daily = DailyActivity(
         date=today,
         github=gh_activity,
         clickup=cu_activity,
-        manual_updates=_load_manual_updates(),
+        manual_updates=manual_updates,
     )
 
     # --- Generate summary -----------------------------------------------------

@@ -1,27 +1,18 @@
 """
-Dashboard View — scheduler status, quick stats, and trigger button.
+Dashboard View — Material Design 3 styled scheduler status, stats, and actions.
 """
 
 from __future__ import annotations
 
 import threading
+import tkinter as tk
 from datetime import datetime
 from typing import Any, Dict
 
 import customtkinter as ctk
 
 from desktop.local_scheduler import LocalScheduler
-
-_CARD_BG = ("#ffffff", "#1e1f2e")
-_CARD_BORDER = ("#e5e7eb", "#2d2f3d")
-_MUTED = ("#6b7280", "#8b8d97")
-_ACCENT = ("#6366f1", "#818cf8")
-_GREEN = "#22c55e"
-_RED = "#ef4444"
-
-
-def _card(parent: Any, **kw: Any) -> ctk.CTkFrame:
-    return ctk.CTkFrame(parent, corner_radius=14, fg_color=_CARD_BG, border_color=_CARD_BORDER, border_width=1, **kw)
+from desktop import theme as T
 
 
 class DashboardView(ctk.CTkFrame):
@@ -32,11 +23,12 @@ class DashboardView(ctk.CTkFrame):
         self._is_fetching = False
         self._dot_count = 0
         self._dot_job = None
+        self._send_dot_count = 0
+        self._send_dot_job = None
 
         self.grid_columnconfigure(0, weight=1)
         self._build_ui()
         self._tick()
-        # Auto-fetch dashboard stats on first load.
         self.after(300, self._refresh_stats)
 
     def update_config(self, config: Dict[str, Any]) -> None:
@@ -44,72 +36,115 @@ class DashboardView(ctk.CTkFrame):
         self._update_channel_label()
 
     def _build_ui(self) -> None:
-        row = 0
-
+        # ── Header with action buttons ────────────────────────────────
         hdr = ctk.CTkFrame(self, fg_color="transparent")
-        hdr.grid(row=row, column=0, sticky="ew", pady=(0, 20))
-        ctk.CTkLabel(hdr, text="Dashboard", font=ctk.CTkFont(size=28, weight="bold"), anchor="w").pack(anchor="w")
-        ctk.CTkLabel(hdr, text="Overview of your EOD automation", font=ctk.CTkFont(size=13), text_color=_MUTED, anchor="w").pack(anchor="w", pady=(2, 0))
-        row += 1
+        hdr.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        hdr.grid_columnconfigure(0, weight=1)
 
-        # Status
-        sc = _card(self)
-        sc.grid(row=row, column=0, sticky="ew", pady=(0, 16))
-        sc.grid_columnconfigure(1, weight=1)
-        self._status_dot = ctk.CTkLabel(sc, text="\u25cf", font=ctk.CTkFont(size=20), text_color=_GREEN, width=30)
-        self._status_dot.grid(row=0, column=0, padx=(20, 6), pady=18)
-        self._status_label = ctk.CTkLabel(sc, text="Scheduler Running", font=ctk.CTkFont(size=16, weight="bold"), anchor="w")
-        self._status_label.grid(row=0, column=1, sticky="w", pady=18)
-        self._toggle_btn = ctk.CTkButton(sc, text="Pause", width=90, height=34, font=ctk.CTkFont(size=13), corner_radius=8, fg_color=("gray80", "gray30"), hover_color=("gray70", "gray38"), text_color=("gray10", "gray90"), command=self._toggle_scheduler)
-        self._toggle_btn.grid(row=0, column=2, padx=18, pady=18)
-        row += 1
+        title_box = ctk.CTkFrame(hdr, fg_color="transparent")
+        title_box.grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(title_box, text="Dashboard", font=ctk.CTkFont(size=22, weight="bold"),
+                     text_color=T.ON_SURFACE, anchor="w").pack(anchor="w")
+        ctk.CTkLabel(title_box, text="Overview of your EOD automation",
+                     font=ctk.CTkFont(size=12), text_color=T.MUTED, anchor="w"
+                     ).pack(anchor="w", pady=(1, 0))
 
-        # Schedule
-        sch = _card(self)
-        sch.grid(row=row, column=0, sticky="ew", pady=(0, 16))
-        sch.grid_columnconfigure(1, weight=1)
-        self._next_run_label = ctk.CTkLabel(sch, text="Next report:  \u2014", font=ctk.CTkFont(size=14), anchor="w")
-        self._next_run_label.grid(row=0, column=0, padx=20, pady=(16, 4), sticky="w")
-        self._last_run_label = ctk.CTkLabel(sch, text="Last report:  \u2014", font=ctk.CTkFont(size=14), anchor="w")
-        self._last_run_label.grid(row=1, column=0, padx=20, pady=(0, 16), sticky="w")
-        self._channel_label = ctk.CTkLabel(sch, text="", font=ctk.CTkFont(size=12), text_color=_MUTED, anchor="e")
-        self._channel_label.grid(row=0, column=1, padx=20, pady=(16, 4), sticky="e")
+        btn_box = ctk.CTkFrame(hdr, fg_color="transparent")
+        btn_box.grid(row=0, column=1, sticky="e")
+
+        self._refresh_btn = T.m3_tonal_button(btn_box, text="\u21BB  Refresh   ",
+                                              command=self._refresh_stats, width=130)
+        self._refresh_btn.pack(side="left", padx=(0, 6))
+
+        self._send_btn = T.m3_filled_button(btn_box, text="\u25B6  Send EOD  ",
+                                            command=self._trigger_now, width=130)
+        self._send_btn.pack(side="left")
+
+        # ── Status label ──────────────────────────────────────────────
+        self._action_status = ctk.CTkLabel(self, text="", font=ctk.CTkFont(size=12),
+                                           text_color=T.MUTED, anchor="w")
+        self._action_status.grid(row=1, column=0, sticky="w", pady=(0, 8))
+
+        # ── Scheduler status card ─────────────────────────────────────
+        sc = T.m3_card(self)
+        sc.grid(row=2, column=0, sticky="ew", pady=(0, 10))
+        sc_inner = ctk.CTkFrame(sc, fg_color="transparent")
+        sc_inner.pack(fill="x", padx=16, pady=14)
+
+        # Circular dot via a small canvas
+        self._dot_canvas = tk.Canvas(sc_inner, width=14, height=14,
+                                     highlightthickness=0, bd=0)
+        self._dot_canvas.pack(side="left", padx=(0, 10))
+        self._dot_id = self._dot_canvas.create_oval(1, 1, 13, 13, fill="#1B873B", outline="")
+        self._apply_canvas_bg()
+
+        self._status_label = ctk.CTkLabel(sc_inner, text="Scheduler Running",
+                                          font=ctk.CTkFont(size=14, weight="bold"),
+                                          text_color=T.ON_SURFACE, anchor="w")
+        self._status_label.pack(side="left", fill="x", expand=True)
+        self._toggle_btn = T.m3_tonal_button(sc_inner, text="Pause", width=90,
+                                             command=self._toggle_scheduler)
+        self._toggle_btn.pack(side="right")
+
+        # ── Schedule info card ────────────────────────────────────────
+        sch = T.m3_card(self)
+        sch.grid(row=3, column=0, sticky="ew", pady=(0, 10))
+        sch_inner = ctk.CTkFrame(sch, fg_color="transparent")
+        sch_inner.pack(fill="x", padx=16, pady=12)
+        sch_inner.grid_columnconfigure(1, weight=1)
+
+        self._next_run_label = ctk.CTkLabel(sch_inner, text="Next report:  \u2014",
+                                            font=ctk.CTkFont(size=13),
+                                            text_color=T.ON_SURFACE, anchor="w")
+        self._next_run_label.grid(row=0, column=0, sticky="w")
+        self._last_run_label = ctk.CTkLabel(sch_inner, text="Last report:  \u2014",
+                                            font=ctk.CTkFont(size=13),
+                                            text_color=T.MUTED, anchor="w")
+        self._last_run_label.grid(row=1, column=0, sticky="w", pady=(2, 0))
+        self._channel_label = ctk.CTkLabel(sch_inner, text="",
+                                           font=ctk.CTkFont(size=12),
+                                           text_color=T.MUTED, anchor="e")
+        self._channel_label.grid(row=0, column=1, rowspan=2, sticky="e")
         self._update_channel_label()
-        row += 1
 
-        # Stats
+        # ── Stats row ─────────────────────────────────────────────────
         sf = ctk.CTkFrame(self, fg_color="transparent")
-        sf.grid(row=row, column=0, sticky="ew", pady=(0, 16))
+        sf.grid(row=4, column=0, sticky="ew", pady=(0, 10))
         for i in range(4):
             sf.grid_columnconfigure(i, weight=1)
-        stat_defs = [("Commits", "0", "#3b82f6", "\U0001F4DD"), ("PRs", "0", "#8b5cf6", "\U0001F500"), ("Completed", "0", _GREEN, "\u2705"), ("In Progress", "0", "#f59e0b", "\u23F3")]
+
+        stat_defs = [
+            ("Commits", "0", T.INFO, "\U0001F4DD"),
+            ("PRs", "0", T.PRIMARY, "\U0001F500"),
+            ("Completed", "0", T.SUCCESS, "\u2705"),
+            ("In Progress", "0", T.WARNING, "\u23F3"),
+        ]
         self._stat_values: list[ctk.CTkLabel] = []
         for col, (title, val, color, icon) in enumerate(stat_defs):
-            card = _card(sf)
-            card.grid(row=0, column=col, padx=5, sticky="ew")
-            card.grid_columnconfigure(0, weight=1)
-            ctk.CTkLabel(card, text=icon, font=ctk.CTkFont(size=18)).grid(row=0, column=0, padx=16, pady=(16, 0))
-            vl = ctk.CTkLabel(card, text=val, font=ctk.CTkFont(size=30, weight="bold"), text_color=color)
-            vl.grid(row=1, column=0, padx=16, pady=(4, 2))
+            card = T.m3_filled_card(sf)
+            card.grid(row=0, column=col, padx=(0 if col == 0 else 4, 0), sticky="ew")
+
+            ctk.CTkLabel(card, text=icon, font=ctk.CTkFont(size=18),
+                         text_color=T.MUTED).pack(pady=(12, 0))
+            vl = ctk.CTkLabel(card, text=val, font=ctk.CTkFont(size=28, weight="bold"),
+                              text_color=color)
+            vl.pack(pady=(2, 0))
             self._stat_values.append(vl)
-            ctk.CTkLabel(card, text=title, font=ctk.CTkFont(size=12), text_color=_MUTED).grid(row=2, column=0, padx=16, pady=(0, 14))
-        row += 1
+            ctk.CTkLabel(card, text=title, font=ctk.CTkFont(size=11),
+                         text_color=T.MUTED).pack(pady=(0, 12))
 
-        # Actions
-        ac = _card(self)
-        ac.grid(row=row, column=0, sticky="ew")
-        ac.grid_columnconfigure(2, weight=1)
+    # ── Canvas background sync ────────────────────────────────────────
 
-        self._send_btn = ctk.CTkButton(ac, text="\u25B6  Send EOD Now", font=ctk.CTkFont(size=14, weight="bold"), height=42, corner_radius=10, fg_color=_ACCENT, hover_color=("#4f46e5", "#6366f1"), command=self._trigger_now)
-        self._send_btn.grid(row=0, column=0, padx=(18, 10), pady=(18, 4), sticky="w")
+    def _apply_canvas_bg(self) -> None:
+        mode = ctk.get_appearance_mode()
+        bg = "#FFFFFF" if mode == "Light" else "#211F26"
+        try:
+            self._dot_canvas.configure(bg=bg)
+        except Exception:
+            pass
+        self.after(2000, self._apply_canvas_bg)
 
-        self._refresh_btn = ctk.CTkButton(ac, text="\u21BB  Refresh Stats", font=ctk.CTkFont(size=13), height=42, corner_radius=10, fg_color=_ACCENT, hover_color=("#4f46e5", "#6366f1"), command=self._refresh_stats)
-        self._refresh_btn.grid(row=0, column=1, pady=(18, 4), sticky="w")
-
-        self._action_status = ctk.CTkLabel(ac, text="", font=ctk.CTkFont(size=12), text_color=_MUTED, anchor="w")
-        self._action_status.grid(row=1, column=0, columnspan=3, padx=20, pady=(2, 16), sticky="w")
-
-    # -- Scheduler events --
+    # ── Scheduler events ──────────────────────────────────────────────
 
     def on_scheduler_event(self, event: str, detail: Dict[str, Any]) -> None:
         if event == "scheduler_started":
@@ -117,19 +152,34 @@ class DashboardView(ctk.CTkFrame):
         elif event == "scheduler_stopped":
             self._set_status(False)
         elif event == "pipeline_started":
-            self._action_status.configure(text="Sending EOD report...")
-            self._send_btn.configure(state="disabled", text="\u25B6  Sending...")
+            self._action_status.configure(text="Sending EOD report...", text_color=T.MUTED)
+            self._send_btn.configure(state="disabled")
+            if not self._send_dot_job:
+                self._send_dot_count = 0
+                self._animate_send_dots()
         elif event == "pipeline_completed":
             ts = detail.get("timestamp", "")
             self._last_run_label.configure(text=f"Last report:  {self._fmt(ts)}")
-            self._action_status.configure(text="\u2705  EOD report sent successfully!")
-            self._send_btn.configure(state="normal", text="\u25B6  Send EOD Now")
+            self._action_status.configure(text="EOD report sent successfully", text_color=T.SUCCESS)
+            if self._send_dot_job:
+                self.after_cancel(self._send_dot_job)
+                self._send_dot_job = None
+            self._send_btn.configure(state="normal", text="\u25B6  Send EOD  ")
         elif event == "pipeline_error":
             err = detail.get("error", "Unknown error")
-            self._action_status.configure(text=f"\u274C  Error: {err[:80]}")
-            self._send_btn.configure(state="normal", text="\u25B6  Send EOD Now")
+            self._action_status.configure(text=f"Error: {err[:80]}", text_color=T.ERROR)
+            if self._send_dot_job:
+                self.after_cancel(self._send_dot_job)
+                self._send_dot_job = None
+            self._send_btn.configure(state="normal", text="\u25B6  Send EOD  ")
+        elif event == "job_missed":
+            scheduled = detail.get("scheduled_time", "")
+            self._action_status.configure(
+                text=f"Missed ({scheduled}) \u2014 system was likely asleep",
+                text_color=T.WARNING,
+            )
 
-    # -- Actions --
+    # ── Actions ───────────────────────────────────────────────────────
 
     def _toggle_scheduler(self) -> None:
         if self._scheduler.is_running:
@@ -143,9 +193,19 @@ class DashboardView(ctk.CTkFrame):
             self._set_status(True)
 
     def _trigger_now(self) -> None:
-        self._action_status.configure(text="Triggering EOD pipeline...")
-        self._send_btn.configure(state="disabled", text="\u25B6  Sending...")
+        self._action_status.configure(text="Triggering EOD pipeline...", text_color=T.MUTED)
+        self._send_btn.configure(state="disabled")
+        self._send_dot_count = 0
+        self._animate_send_dots()
         self._scheduler.trigger_now()
+
+    def _animate_send_dots(self) -> None:
+        if self._send_btn.cget("state") != "disabled":
+            return
+        self._send_dot_count = (self._send_dot_count % 3) + 1
+        dots = ("." * self._send_dot_count).ljust(3)
+        self._send_btn.configure(text=f"\u25B6  Sending{dots} ")
+        self._send_dot_job = self.after(350, self._animate_send_dots)
 
     def _refresh_stats(self) -> None:
         if self._is_fetching:
@@ -157,12 +217,11 @@ class DashboardView(ctk.CTkFrame):
         threading.Thread(target=self._fetch_stats_bg, daemon=True).start()
 
     def _animate_dots(self) -> None:
-        """Cycle dots inside the button text as a loading indicator."""
         if not self._is_fetching:
             return
         self._dot_count = (self._dot_count % 3) + 1
-        dots = "." * self._dot_count
-        self._refresh_btn.configure(text=f"\u21BB  Refreshing{dots}")
+        dots = ("." * self._dot_count).ljust(3)
+        self._refresh_btn.configure(text=f"\u21BB  Loading{dots} ")
         self._dot_job = self.after(350, self._animate_dots)
 
     def _fetch_stats_bg(self) -> None:
@@ -192,20 +251,16 @@ class DashboardView(ctk.CTkFrame):
         if self._dot_job:
             self.after_cancel(self._dot_job)
             self._dot_job = None
-        self._refresh_btn.configure(state="normal", text="\u21BB  Refresh Stats")
-        self._action_status.configure(text="\u2705  Stats refreshed")
+        self._refresh_btn.configure(state="normal", text="\u21BB  Refresh   ")
+        self._action_status.configure(text="Stats refreshed", text_color=T.SUCCESS)
 
-    # -- Helpers --
+    # ── Helpers ───────────────────────────────────────────────────────
 
     def _set_status(self, running: bool) -> None:
-        if running:
-            self._status_dot.configure(text_color=_GREEN)
-            self._status_label.configure(text="Scheduler Running")
-            self._toggle_btn.configure(text="Pause")
-        else:
-            self._status_dot.configure(text_color=_RED)
-            self._status_label.configure(text="Scheduler Paused")
-            self._toggle_btn.configure(text="Resume")
+        color = "#1B873B" if running else "#B3261E"
+        self._dot_canvas.itemconfigure(self._dot_id, fill=color)
+        self._status_label.configure(text="Scheduler Running" if running else "Scheduler Paused")
+        self._toggle_btn.configure(text="Pause" if running else "Resume")
 
     def _update_channel_label(self) -> None:
         ch = self._config.get("slack_channel", "")

@@ -8,6 +8,7 @@ build/
 
 # Env
 .env
+env.json
 .venv/
 venv/
 env/
