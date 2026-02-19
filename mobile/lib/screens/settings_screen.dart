@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../main.dart' show prefs;
 import '../services/api_service.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -29,6 +29,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   @override
+  void didUpdateWidget(covariant SettingsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.currentUrl != widget.currentUrl && _urlController.text.isEmpty) {
+      _urlController.text = widget.currentUrl;
+    }
+  }
+
+  @override
   void dispose() {
     _urlController.dispose();
     super.dispose();
@@ -36,7 +44,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _save() async {
     final url = _urlController.text.trim().replaceAll(RegExp(r'/+$'), '');
-    final prefs = await SharedPreferences.getInstance();
     await prefs.setString('base_url', url);
     widget.onUrlChanged(url);
     if (mounted) {

@@ -6,12 +6,18 @@ import 'screens/settings_screen.dart';
 import 'screens/support_screen.dart';
 import 'services/api_service.dart';
 
-void main() {
-  runApp(const EODReporterApp());
+late final SharedPreferences prefs;
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  prefs = await SharedPreferences.getInstance();
+  final savedUrl = prefs.getString('base_url') ?? '';
+  runApp(EODReporterApp(initialUrl: savedUrl));
 }
 
 class EODReporterApp extends StatelessWidget {
-  const EODReporterApp({super.key});
+  final String initialUrl;
+  const EODReporterApp({super.key, required this.initialUrl});
 
   @override
   Widget build(BuildContext context) {
@@ -29,13 +35,14 @@ class EODReporterApp extends StatelessWidget {
         brightness: Brightness.dark,
       ),
       themeMode: ThemeMode.system,
-      home: const MainShell(),
+      home: MainShell(initialUrl: initialUrl),
     );
   }
 }
 
 class MainShell extends StatefulWidget {
-  const MainShell({super.key});
+  final String initialUrl;
+  const MainShell({super.key, required this.initialUrl});
 
   @override
   State<MainShell> createState() => _MainShellState();
@@ -43,19 +50,12 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
-  String _baseUrl = '';
+  late String _baseUrl;
 
   @override
   void initState() {
     super.initState();
-    _loadBaseUrl();
-  }
-
-  Future<void> _loadBaseUrl() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _baseUrl = prefs.getString('base_url') ?? '';
-    });
+    _baseUrl = widget.initialUrl;
   }
 
   void _onBaseUrlChanged(String url) {
