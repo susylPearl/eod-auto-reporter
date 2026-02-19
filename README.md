@@ -4,6 +4,8 @@ Automated End-of-Day summary generator that pulls activity from **GitHub**, **Cl
 
 Runs as a **cloud service** (FastAPI) or a **native macOS desktop app** (CustomTkinter).
 
+> **Download the macOS app:** [EOD-Reporter-1.0.0.dmg](https://github.com/susylPearl/eod-auto-reporter/releases/download/v1.0.0/EOD-Reporter-1.0.0.dmg)
+
 ---
 
 ## Table of Contents
@@ -71,6 +73,30 @@ Runs as a **cloud service** (FastAPI) or a **native macOS desktop app** (CustomT
 - `POST /trigger-eod` — manually trigger the EOD pipeline
 - Auto-starts scheduler on boot
 - Docker-ready with `Dockerfile` included
+
+---
+
+## Screenshots
+
+### Dashboard
+Scheduler status, next/last run times, and live stats at a glance.
+
+<img src="docs/screenshots/dashboard.png" width="800" alt="Dashboard View">
+
+### Activity
+Real-time preview of today's GitHub, ClickUp, and Slack activity with source filters and manual updates.
+
+<img src="docs/screenshots/activity.png" width="800" alt="Activity View">
+
+### Settings
+Configure all integrations with per-field test buttons. Import from `.env`, JSON, or text files.
+
+<img src="docs/screenshots/settings.png" width="800" alt="Settings View">
+
+### Support & Documentation
+In-app setup guides and keyboard shortcuts.
+
+<img src="docs/screenshots/support.png" width="800" alt="Support View">
 
 ---
 
@@ -278,6 +304,8 @@ chmod +x build_dmg.sh
 ```
 
 This runs the py2app build and packages the result into `dist/EOD-Reporter-1.0.0.dmg`. Open the DMG and drag **EOD Reporter** to Applications.
+
+**Or download the pre-built DMG:** [EOD-Reporter-1.0.0.dmg](https://github.com/susylPearl/eod-auto-reporter/releases/download/v1.0.0/EOD-Reporter-1.0.0.dmg)
 
 ---
 
