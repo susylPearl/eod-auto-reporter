@@ -151,8 +151,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
                         color: _testOk == true
-                            ? const Color(0xFF1B873B).withOpacity(0.1)
-                            : Colors.red.withOpacity(0.1),
+                            ? const Color(0xFF1B873B).withValues(alpha: 0.1)
+                            : Colors.red.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Row(
